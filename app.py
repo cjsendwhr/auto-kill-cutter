@@ -10,7 +10,7 @@ st.set_page_config(page_title="게임 킬 장면 컷편집기", page_icon="✂�
 st.title("✂️ 게임 킬 장면 자동 컷편집기")
 st.markdown("""
 **사용법:**
-1. 게임 녹화 영상과 **'킬 로그 이미지'**를 업로드하세요.
+1. 게임 녹화 영상(MP4, MKV 등)과 **'킬 로그 이미지'**를 업로드하세요.
 2. 프로그램이 킬 로그가 뜬 시간을 찾아 **앞뒤 1초씩(총 2초)** 자동으로 잘라줍니다.
 """)
 
@@ -25,8 +25,8 @@ threshold = st.sidebar.slider(
     help="킬 장면을 잘 못 찾으면 숫자를 낮추고(0.6~0.7), 엉뚱한 장면을 자르면 숫자를 높이세요(0.85~0.9)."
 )
 
-# 1. 파일 업로드
-uploaded_video = st.file_uploader("1. 게임 영상 파일 (MP4)", type=["mp4", "mov", "avi"])
+# 1. 파일 업로드 (MKV 추가됨 ⭐)
+uploaded_video = st.file_uploader("1. 게임 영상 파일", type=["mp4", "mov", "avi", "mkv"])
 uploaded_icon = st.file_uploader("2. 킬 로그 이미지 (PNG, JPG)", type=["png", "jpg", "jpeg"])
 
 # 임시 파일 저장 함수
@@ -124,6 +124,7 @@ if st.button("🚀 컷편집 시작!"):
                     
                     # 결과 파일 저장
                     output_path = tempfile.mktemp(suffix=".mp4")
+                    # 오디오 코덱 설정 추가 (안정성 확보)
                     final_clip.write_videofile(output_path, codec="libx264", audio_codec="aac", temp_audiofile='temp-audio.m4a', remove_temp=True)
                     
                     progress_bar.progress(100)
