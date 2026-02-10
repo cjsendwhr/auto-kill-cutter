@@ -7,27 +7,29 @@ import os
 
 # --- 웹사이트 설정 ---
 st.set_page_config(page_title="게임 킬 장면 컷편집기", page_icon="✂️")
-st.title("✂️ 게임 킬 장면 자동 컷편집기")
+st.title("✂️ 게임 킬 장면 자동 컷편집기 (강화판)")
 st.markdown("""
-**사용법:**
-1. 게임 녹화 영상(MP4, MKV 등)과 **'킬 로그 이미지'**를 업로드하세요.
-2. 프로그램이 킬 로그가 뜬 시간을 찾아 **앞뒤 1초씩(총 2초)** 자동으로 잘라줍니다.
+**💡 꿀팁:**
+1. **반드시 영상 파일을 재생시키고, 그 화면을 캡처**해서 아이콘으로 쓰세요. (해상도 일치 필수!)
+2. 인식이 안 되면 왼쪽 사이드바에서 **민감도**를 조절하세요.
 """)
 
 # --- 사이드바: 설정 옵션 ---
 st.sidebar.header("⚙️ 설정")
 threshold = st.sidebar.slider(
-    "민감도 설정 (기본값: 0.8)", 
-    min_value=0.5, 
-    max_value=0.99, 
-    value=0.8, 
-    step=0.01,
-    help="킬 장면을 잘 못 찾으면 숫자를 낮추고(0.6~0.7), 엉뚱한 장면을 자르면 숫자를 높이세요(0.85~0.9)."
+    "민감도 (기본값: 0.7)", 
+    min_value=0.4, 
+    max_value=0.9, 
+    value=0.7, 
+    step=0.05,
+    help="못 찾으면 숫자를 낮추세요(0.5~0.6). 엉뚱한 걸 자르면 높이세요."
 )
 
-# 1. 파일 업로드 (MKV 추가됨 ⭐)
+use_grayscale = st.sidebar.checkbox("흑백 모드로 찾기 (추천)", value=True, help="색깔을 무시하고 모양만 봅니다. 인식률이 좋습니다.")
+
+# 1. 파일 업로드
 uploaded_video = st.file_uploader("1. 게임 영상 파일", type=["mp4", "mov", "avi", "mkv"])
-uploaded_icon = st.file_uploader("2. 킬 로그 이미지 (PNG, JPG)", type=["png", "jpg", "jpeg"])
+uploaded_icon = st.file_uploader("2. 킬 로그 이미지", type=["png", "jpg", "jpeg"])
 
 # 임시 파일 저장 함수
 def save_uploaded_file(uploaded_file):
@@ -43,9 +45,8 @@ def save_uploaded_file(uploaded_file):
 # --- 메인 로직 ---
 if st.button("🚀 컷편집 시작!"):
     if uploaded_video and uploaded_icon:
-        st.info("영상을 분석 중입니다... (영상 길이에 따라 시간이 걸립니다)")
+        st.info("영상을 분석 중입니다... ☕ 잠시만 기다려주세요.")
         
-        # 파일 저장
         video_path = save_uploaded_file(uploaded_video)
         icon_path = save_uploaded_file(uploaded_icon)
         
@@ -53,101 +54,102 @@ if st.button("🚀 컷편집 시작!"):
         status_text = st.empty()
         
         try:
-            # 1. OpenCV로 킬 장면 시간(Timestamp) 찾기
+            # 1. 준비
             cap = cv2.VideoCapture(video_path)
-            icon = cv2.imread(icon_path, cv2.IMREAD_COLOR)
-            
-            # 이미지 읽기 실패 시 예외 처리
+            # 이미지 읽기
+            if use_grayscale:
+                icon = cv2.imread(icon_path, cv2.IMREAD_GRAYSCALE)
+            else:
+                icon = cv2.imread(icon_path, cv2.IMREAD_COLOR)
+
             if icon is None:
-                st.error("이미지 파일을 읽을 수 없습니다. 다른 이미지로 시도해주세요.")
+                st.error("이미지를 읽을 수 없습니다.")
                 cap.release()
             else:
                 timestamps = []
                 total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
                 fps = cap.get(cv2.CAP_PROP_FPS)
-                if fps == 0: fps = 30.0 # 기본값 방어
+                if fps == 0: fps = 30.0
                 
                 frame_idx = 0
                 
+                # 2. 영상 스캔
                 while cap.isOpened():
                     ret, frame = cap.read()
                     if not ret:
                         break
                     
-                    # 5프레임마다 검사 (속도 최적화)
+                    # 5프레임마다 검사
                     if frame_idx % 5 == 0:
-                        # 템플릿 매칭 (이미지 찾기)
                         try:
-                            result = cv2.matchTemplate(frame, icon, cv2.TM_CCOEFF_NORMED)
+                            # 흑백 모드 변환
+                            if use_grayscale:
+                                search_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                            else:
+                                search_frame = frame
+
+                            # 매칭 시작
+                            result = cv2.matchTemplate(search_frame, icon, cv2.TM_CCOEFF_NORMED)
                             min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
                             
-                            # 설정한 민감도보다 높으면 '킬'로 인식
                             if max_val >= threshold:
                                 current_time = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
                                 
-                                # 중복 방지 (이전 킬 장면과 3초 이내면 무시)
+                                # 중복 방지 (3초 쿨타임)
                                 if not timestamps or (current_time - timestamps[-1] > 3):
                                     timestamps.append(current_time)
+                                    print(f"Found at {current_time}s (Accuracy: {max_val:.2f})")
                         except Exception as e:
-                            # 이미지 크기가 영상보다 클 경우 등 에러 무시
                             pass
                             
                     frame_idx += 1
-                    # 진행률 표시 (전체의 50%까지는 분석 단계)
                     if frame_idx % 100 == 0:
                         prog = int((frame_idx / total_frames) * 50)
                         progress_bar.progress(min(50, prog))
-                        status_text.text(f"분석 중... {frame_idx}/{total_frames} 프레임")
+                        status_text.text(f"🔍 킬 로그 찾는 중... ({int(frame_idx/total_frames*100)}%)")
                 
                 cap.release()
                 
-                # 2. MoviePy로 영상 자르기
+                # 3. 결과 처리
                 if timestamps:
-                    status_text.text(f"🔫 총 {len(timestamps)}개의 킬 장면 발견! 자르는 중...")
+                    status_text.text(f"✂️ {len(timestamps)}개의 킬 장면을 자르고 있습니다...")
                     clip = VideoFileClip(video_path)
                     clips = []
                     
                     for idx, t in enumerate(timestamps):
-                        # 킬 발생 시점 기준: 앞 1초 ~ 뒤 1초 (총 2초)
-                        start = max(0, t - 1)
-                        end = min(clip.duration, t + 1)
-                        
+                        start = max(0, t - 2) # 킬 2초 전 (여유 있게 수정)
+                        end = min(clip.duration, t + 2) # 킬 2초 후
                         sub = clip.subclip(start, end)
                         clips.append(sub)
                         
-                        # 진행률 (50% ~ 90%)
                         prog = 50 + int((idx / len(timestamps)) * 40)
                         progress_bar.progress(min(90, prog))
                     
-                    # 조각 영상 합치기
                     final_clip = concatenate_videoclips(clips)
                     
-                    # 결과 파일 저장
                     output_path = tempfile.mktemp(suffix=".mp4")
-                    # 오디오 코덱 설정 추가 (안정성 확보)
                     final_clip.write_videofile(output_path, codec="libx264", audio_codec="aac", temp_audiofile='temp-audio.m4a', remove_temp=True)
                     
                     progress_bar.progress(100)
-                    status_text.success("🎉 편집 완료!")
+                    status_text.success(f"🎉 편집 완료! {len(timestamps)}개의 킬 장면을 합쳤습니다.")
                     
-                    # 다운로드 버튼
                     with open(output_path, "rb") as file:
                         st.download_button(
-                            label="📥 하이라이트 영상 다운로드",
+                            label="📥 영상 다운로드",
                             data=file,
                             file_name="kill_highlight.mp4",
                             mime="video/mp4"
                         )
                 else:
-                    st.warning("킬 장면을 찾지 못했습니다. 왼쪽 사이드바에서 '민감도'를 낮춰서(0.6~0.7) 다시 시도해보세요!")
+                    st.error("😭 킬 장면을 하나도 못 찾았습니다.")
+                    st.warning("""
+                    **해결 방법:**
+                    1. 동영상 파일을 재생하고 **일시정지 한 상태에서 캡처**했나요? (해상도가 다르면 못 찾습니다)
+                    2. 왼쪽 설정에서 **'민감도'를 0.5 ~ 0.6**으로 낮추고 다시 해보세요.
+                    """)
                     
         except Exception as e:
-            st.error(f"오류 발생: {e}")
-            
+            st.error(f"오류: {e}")
         finally:
-            # 임시 파일 삭제 (청소)
             if os.path.exists(video_path): os.remove(video_path)
             if os.path.exists(icon_path): os.remove(icon_path)
-            
-    else:
-        st.warning("영상과 이미지 파일을 모두 업로드해주세요.")
